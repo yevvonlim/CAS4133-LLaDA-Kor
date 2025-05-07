@@ -131,23 +131,23 @@ def generate(
     return x
 
 
-def main():
+def main(model, prompt, steps, gen_length):
     device = "cuda"
 
-    model = (
-        AutoModel.from_pretrained(
-            "GSAI-ML/LLaDA-8B-Instruct",
-            trust_remote_code=True,
-            torch_dtype=torch.bfloat16,
-        )
-        .to(device)
-        .eval()
-    )
+    # model = (
+    #     AutoModel.from_pretrained(
+    #         "GSAI-ML/LLaDA-8B-Instruct",
+    #         trust_remote_code=True,
+    #         torch_dtype=torch.bfloat16,
+    #     )
+    #     .to(device)
+    #     .eval()
+    # )
     tokenizer = AutoTokenizer.from_pretrained(
         "GSAI-ML/LLaDA-8B-Instruct", trust_remote_code=True
     )
 
-    prompt = "Lily can run 12 kilometers per hour for 4 hours. After that, she runs 6 kilometers per hour. How many kilometers can she run in 8 hours?"
+    # prompt = "Lily can run 12 kilometers per hour for 4 hours. After that, she runs 6 kilometers per hour. How many kilometers can she run in 8 hours?"
 
     # Add special tokens for the Instruct model. The Base model does not require the following two lines.
     m = [

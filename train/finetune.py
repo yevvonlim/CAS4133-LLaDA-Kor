@@ -320,9 +320,11 @@ def train():
     trainer.train()
     trainer.save_state()
 
-    safe_save_model_for_hf_trainer(
-        trainer=trainer, output_dir=training_args.output_dir, bias=lora_args.lora_bias
-    )
+    trainer.model.save_pretrained(training_args.output_dir)
+    tokenizer.save_pretrained(training_args.output_dir)
+    # safe_save_model_for_hf_trainer(
+    #     trainer=trainer, output_dir=training_args.output_dir, bias=lora_args.lora_bias
+    # )
 
 
 if __name__ == "__main__":
