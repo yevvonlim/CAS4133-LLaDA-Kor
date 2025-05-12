@@ -3,6 +3,7 @@ import numpy as np
 import torch.nn.functional as F
 
 from transformers import AutoTokenizer, AutoModel
+from peft import PeftModel
 
 def add_gumbel_noise(logits, temperature):
     if temperature == 0:
@@ -11,6 +12,7 @@ def add_gumbel_noise(logits, temperature):
     noise = torch.rand_like(logits, dtype=torch.float64)
     gumbel_noise = (-torch.log(noise)) ** temperature
     return logits.exp() / gumbel_noise
+
 
 def get_num_transfer_tokens(mask_index, steps):
     mask_num = mask_index.sum(dim=1, keepdim=True)
@@ -26,6 +28,7 @@ def get_num_transfer_tokens(mask_index, steps):
     for i in range(mask_num.size(0)):
         num_transfer_tokens[i, : remainder[i]] += 1
     return num_transfer_tokens
+
 
 @torch.no_grad()
 def generate_stream(
@@ -106,11 +109,38 @@ def generate_stream(
     # final output
     return
 
+
+device = "cuda"
+path = "GSAI-ML/LLaDA-8B-Instruct"  #
+# path = "yevvonlim/LLaDA-kor-poc"
+peft = "/workspace/LLaDA/llada_kor/checkpoint-1100"
 # Example usage:
-tokenizer = AutoTokenizer.from_pretrained("GSAI-ML/LLaDA-8B-Instruct", trust_remote_code=True)
-model = AutoModel.from_pretrained("GSAI-ML/LLaDA-8B-Instruct", trust_remote_code=True).to('cuda').eval()
-prompt_text = "Your input prompt"
-prompt_ids = tokenizer(prompt_text, return_tensors='pt').input_ids.to('cuda')
-for step_x in generate_stream(model, prompt_ids, steps=128, gen_length=128, block_length=32):
-    decoded = tokenizer.decode(step_x[0, prompt_ids.shape[1]:], skip_special_tokens=True)
-    print(decoded, end='\r')
+tokenizer = AutoTokenizer.from_pretrained(peft, trust_remote_code=True)
+model = AutoModel.from_pretrained(path, trust_remote_code=True)
+# model.resize_token_embeddings(len(tokenizer))
+model = PeftModel.from_pretrained(model, peft).to(device).eval()
+print("model loaded")
+prompt_text = "why can't we divide number by zero?"
+m = [
+    {"role": "user", "content": prompt_text},
+]
+prompt_text = tokenizer.apply_chat_template(
+    m, add_generation_prompt=True, tokenize=False
+)
+print(prompt_text)
+
+prompt_ids = tokenizer(prompt_text, return_tensors="pt").input_ids.to(device)
+steps = 64*2
+for step_x in generate_stream(
+    model,
+    prompt_ids,
+    steps=steps,
+    gen_length=128,
+    block_length=128,
+):  # , desc="Generating", total=steps):
+    decoded = tokenizer.decode(
+        step_x[0, prompt_ids.shape[1] :], skip_special_tokens=True
+    )
+    # print(f"token len: {torch.sum(step_x[0].ne(tokenizer.pad_token_id))}")
+    print(decoded, end="\r")
+print(decoded)

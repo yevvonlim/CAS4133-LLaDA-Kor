@@ -6,32 +6,22 @@ def preprocess(examples, tokenizer, max_seq_length):
     Tokenize a list of (question, answer) pairs into model-ready input IDs.
     Each sequence is structured as:
       [BOS]
-      <start_id>user<end_id>\n
+      <|im_start|>user<|im_end|>\n
       {question}
       <eot_id>\n
-      <start_id>assistant<end_id>\n
+      <|im_start|>assistant<|im_end|>\n
       {answer} + EOS padding up to max_seq_length
     """
     all_input_ids = []
     prompt_lengths = []
 
     for question, answer in zip(examples["question"], examples["answer"]):
-        # 1) Build the prompt header
-        #    a) Beginning of sequence
-        prompt_tokens = [tokenizer.bos_token_id]
-        #    b) User speaker tag
-        prompt_tokens += tokenizer.encode(
-            "<start_id>user<end_id>\n", add_special_tokens=False
+        prompt = [
+            {"role": "user", "content": question},
+        ]
+        prompt_tokens = tokenizer.apply_chat_template(
+            prompt, add_generation_prompt=True, tokenize=True
         )
-        #    c) Question text
-        prompt_tokens += tokenizer.encode(question, add_special_tokens=False)
-        #    d) End of turn marker
-        prompt_tokens += tokenizer.encode("<eot_id>\n", add_special_tokens=False)
-        #    e) Assistant speaker tag
-        prompt_tokens += tokenizer.encode(
-            "<start_id>assistant<end_id>\n", add_special_tokens=False
-        )
-
         prompt_length = len(prompt_tokens)
 
         # 2) Tokenize the answer and prepare EOS padding
@@ -44,10 +34,10 @@ def preprocess(examples, tokenizer, max_seq_length):
             continue
 
         #    a) Truncate answer if it’s too long
-        truncated = answer_tokens[:slots]
+        # truncated = answer_tokens[:slots]
         #    b) Pad the rest with EOS tokens
-        eos_padding = [tokenizer.eos_token_id] * (slots - len(truncated))
-        answer_section = truncated + eos_padding
+        # eos_padding = [tokenizer.eos_token_id] * (slots - len(truncated))
+        answer_section = answer_tokens  # truncated #+ eos_padding
 
         # 3) Combine prompt and answer into a single input_ids sequence
         input_ids = prompt_tokens + answer_section

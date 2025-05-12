@@ -22,20 +22,22 @@ from datasets import load_dataset
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
 
-def get_llada_collator():
+def get_llada_collator(eos_token_id):
     """
     returns: collator_fn, Trainer <- data_collator=get_llada_collator()
     """
 
     def collator_fn(features):
         # 1) list of list -> tensor
-        input_ids = torch.stack(
-            [torch.tensor(f["input_ids"], dtype=torch.long) for f in features]
-        )
+        input_ids = [f["input_ids"].to(torch.long) for f in features]
+
         prompt_lengths = torch.tensor(
             [f["prompt_lengths"] for f in features], dtype=torch.long
         )
-
+        # 2) pad to the max length in the batch
+        input_ids = torch.nn.utils.rnn.pad_sequence(
+            input_ids, batch_first=True, padding_value=eos_token_id
+        )
         return {
             "input_ids": input_ids,  # (batch, seq_len)
             "prompt_lengths": prompt_lengths,  # (batch,)
@@ -47,6 +49,9 @@ def get_llada_collator():
 @dataclass
 class ModelArguments:
     model_name_or_path: Optional[str] = field(default="Qwen/Qwen-7B")
+    tokenizer_name_or_path: Optional[str] = field(
+        default=None, metadata={"help": "Path to pretrained tokenizer."}
+    )
 
 
 @dataclass
@@ -84,6 +89,9 @@ class LoraArguments:
             "k_proj",
             "v_proj",
             "attn_out",
+            "ff_out",
+            "ff_proj",
+            "up_proj",
         ]
     )
     lora_weight_path: str = ""
@@ -201,7 +209,7 @@ def make_supervised_data_module(
     else:
         eval_dataset = None
 
-    data_collator = get_llada_collator()
+    data_collator = get_llada_collator(tokenizer.pad_token_id)
     return dict(
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
@@ -271,14 +279,20 @@ def train():
         trust_remote_code=True,
         **model_load_kwargs,
     )
+    logging.info(f"Model loaded from {model_args.model_name_or_path}")
+    tokenizer_path = model_args.tokenizer_name_or_path if model_args.tokenizer_name_or_path is not None else model_args.model_name_or_path
+    logging.info(f"Tokenizer loaded from {tokenizer_path}")
     tokenizer = transformers.AutoTokenizer.from_pretrained(
-        model_args.model_name_or_path,
+        tokenizer_path,
         cache_dir=training_args.cache_dir,
         model_max_length=training_args.model_max_length,
         padding_side="right",
-        use_fast=False,
+        # use_fast=False,
         trust_remote_code=True,
     )
+    # special_tokens = {"additional_special_tokens": ["<|im_start|>", "<|im_end|>"]}
+    # tokenizer.add_special_tokens(special_tokens)
+    model.resize_token_embeddings(len(tokenizer))
 
     if training_args.use_lora:
         if lora_args.q_lora or is_chat_model:
