@@ -1,50 +1,68 @@
+from typing import Dict, List
+import random
 from loguru import logger
 
+_SYSTEM_PROMPT = "You are a helpful assistant."
 
-def preprocess(examples, tokenizer, max_seq_length):
+def preprocess(
+    examples: Dict[str, List],
+    tokenizer,
+    max_seq_length: int
+) -> Dict[str, List[List[int]]]:
     """
-    Tokenize a list of (question, answer) pairs into model-ready input IDs.
-    Each sequence is structured as:
-      [BOS]
-      <|im_start|>user<|im_end|>\n
-      {question}
-      <eot_id>\n
-      <|im_start|>assistant<|im_end|>\n
-      {answer} + EOS padding up to max_seq_length
-    """
-    all_input_ids = []
-    prompt_lengths = []
+    Turn raw (conversations, output) pairs into chat-style `input_ids`.
 
-    for question, answer in zip(examples["question"], examples["answer"]):
-        prompt = [
-            {"role": "user", "content": question},
-        ]
-        prompt_tokens = tokenizer.apply_chat_template(
-            prompt, add_generation_prompt=True, tokenize=True
+    Parameters
+    ----------
+    examples : Dict[str, List]
+        Must contain:
+          • "conversations": List of List[Dict[str, str]] each being
+            [{"role": "system|user|assistant", "content": ...}, ...]
+          • "output"       : List of assistant responses (str)
+    tokenizer :
+        Must implement:
+          • apply_chat_template(messages, add_generation_prompt=True, tokenize=True)
+            returning List[int] of token ids
+          • encode(text, add_special_tokens=False) -> List[int]
+    max_seq_length : int
+        Maximum total sequence length (prompt + answer).
+
+    Returns
+    -------
+    dict with:
+      • input_ids      : List of List[int]
+      • prompt_lengths : List[int]   (length of the prompt part only)
+    """
+    all_input_ids: List[List[int]] = []
+    prompt_lengths: List[int] = []
+
+    for conv, answer in zip(examples["instruction"], examples["output"]):
+        # Build the full message list: system prompt + user/assistant turns
+        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        messages.extend(conv)
+
+        # Tokenize the prompt with generation placeholder
+        prompt_tokens: List[int] = tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,  # include assistant tag token
+            tokenize=True,
         )
-        prompt_length = len(prompt_tokens)
-
-        # 2) Tokenize the answer and prepare EOS padding
-        answer_tokens = tokenizer.encode(answer, add_special_tokens=False)
-        slots = max_seq_length - prompt_length
+        prompt_len = len(prompt_tokens)
+        slots = max_seq_length - prompt_len
         if slots <= 0:
             logger.warning(
-                f"max_seq_length={max_seq_length} is too small for prompt_length={prompt_length}."
+                f"[SKIP] max_seq_length={max_seq_length} insufficient for prompt_len={prompt_len}"
             )
             continue
 
-        #    a) Truncate answer if it’s too long
-        # truncated = answer_tokens[:slots]
-        #    b) Pad the rest with EOS tokens
-        # eos_padding = [tokenizer.eos_token_id] * (slots - len(truncated))
-        answer_section = answer_tokens  # truncated #+ eos_padding
+        # Encode the answer, truncating if needed
+        answer_tokens: List[int] = tokenizer.encode(
+            answer, add_special_tokens=False
+        )[:slots]
 
-        # 3) Combine prompt and answer into a single input_ids sequence
-        input_ids = prompt_tokens + answer_section
+        # Concatenate prompt + answer
+        input_ids = prompt_tokens + answer_tokens
         all_input_ids.append(input_ids)
-        prompt_lengths.append(prompt_length)
+        prompt_lengths.append(prompt_len)
 
-    return {
-        "input_ids": all_input_ids,
-        "prompt_lengths": prompt_lengths,
-    }
+    return {"input_ids": all_input_ids, "prompt_lengths": prompt_lengths}

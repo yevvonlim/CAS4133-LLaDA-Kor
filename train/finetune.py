@@ -168,7 +168,8 @@ class LLaDaSupervisedDataset(Dataset):
         self, data_path, tokenizer: transformers.PreTrainedTokenizer, max_len: int
     ):
         super(LLaDaSupervisedDataset, self).__init__()
-        self.ds = load_dataset("json", data_files={"train": data_path})["train"]
+        # self.ds = load_dataset("json", data_files={"train": data_path})["train"]
+        self.ds = load_dataset(data_path)['train']
         # rank0_print("Formatting inputs...")
         self.ds = self.ds.map(
             lambda batch: preprocess(batch, tokenizer, max_len),

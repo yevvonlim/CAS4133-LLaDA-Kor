@@ -113,14 +113,15 @@ def generate_stream(
 device = "cuda"
 path = "GSAI-ML/LLaDA-8B-Instruct"  #
 # path = "yevvonlim/LLaDA-kor-poc"
-peft = "/workspace/LLaDA/llada_kor/checkpoint-1100"
+# peft = "/workspace/llada-trainer/llada_kor/checkpoint-550"
 # Example usage:
-tokenizer = AutoTokenizer.from_pretrained(peft, trust_remote_code=True)
+# tokenizer = AutoTokenizer.from_pretrained(peft, trust_remote_code=True)
+tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
 model = AutoModel.from_pretrained(path, trust_remote_code=True)
 # model.resize_token_embeddings(len(tokenizer))
-model = PeftModel.from_pretrained(model, peft).to(device).eval()
+# model = PeftModel.from_pretrained(model, peft).to(device).eval()
 print("model loaded")
-prompt_text = "why can't we divide number by zero?"
+prompt_text = "6 나누기 0은 뭐야? let's think step by step."
 m = [
     {"role": "user", "content": prompt_text},
 ]
@@ -136,7 +137,7 @@ for step_x in generate_stream(
     prompt_ids,
     steps=steps,
     gen_length=128,
-    block_length=128,
+    block_length=8,
 ):  # , desc="Generating", total=steps):
     decoded = tokenizer.decode(
         step_x[0, prompt_ids.shape[1] :], skip_special_tokens=True
