@@ -1875,7 +1875,7 @@ class LLaDAModelLM(PreTrainedModel):
         input_ids: torch.Tensor,
         max_new_tokens: int = 128,
         steps: int = 128,
-        block_length: int = 128,
+        # block_length: int = 128,
         temperature: float = 0.0,
         cfg_scale: float = 0.0,
         remasking: str = "low_confidence",
@@ -1900,6 +1900,7 @@ class LLaDAModelLM(PreTrainedModel):
             torch.Tensor: The final generated sequence tensor of shape
                           (batch, prompt_len + gen_length).
         """
+        block_length = max_new_tokens // 4
         self.eval() # Ensure model is in evaluation mode
         gen_length = max_new_tokens
         prompt_ids = input_ids

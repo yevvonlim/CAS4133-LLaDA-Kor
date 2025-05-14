@@ -76,6 +76,8 @@ class TrainingArguments(transformers.TrainingArguments):
         },
     )
     use_lora: bool = False
+    evaluation_strategy="steps",      # "no" | "steps" | "epoch"
+    eval_steps=500,                   
 
 
 @dataclass
@@ -165,11 +167,11 @@ class LLaDaSupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
     def __init__(
-        self, data_path, tokenizer: transformers.PreTrainedTokenizer, max_len: int
+        self, data_path, tokenizer: transformers.PreTrainedTokenizer, max_len: int, phase="train"
     ):
         super(LLaDaSupervisedDataset, self).__init__()
         # self.ds = load_dataset("json", data_files={"train": data_path})["train"]
-        self.ds = load_dataset(data_path)['train']
+        self.ds = load_dataset(data_path)[phase]
         # rank0_print("Formatting inputs...")
         self.ds = self.ds.map(
             lambda batch: preprocess(batch, tokenizer, max_len),
@@ -205,8 +207,7 @@ def make_supervised_data_module(
     )
 
     if data_args.eval_data_path:
-        eval_json = json.load(open(data_args.eval_data_path, "r"))
-        eval_dataset = dataset_cls(eval_json, tokenizer=tokenizer, max_len=max_len)
+        eval_dataset = dataset_cls(data_args.eval_data_path, tokenizer=tokenizer, max_len=max_len, phase="validation")
     else:
         eval_dataset = None
 
@@ -293,7 +294,7 @@ def train():
     )
     # special_tokens = {"additional_special_tokens": ["<|im_start|>", "<|im_end|>"]}
     # tokenizer.add_special_tokens(special_tokens)
-    model.resize_token_embeddings(len(tokenizer))
+    # model.resize_token_embeddings(len(tokenizer))
 
     if training_args.use_lora:
         if lora_args.q_lora or is_chat_model:
@@ -322,6 +323,7 @@ def train():
         if training_args.gradient_checkpointing:
             model.enable_input_require_grads()
 
+
     # Load data
     data_module = make_supervised_data_module(
         tokenizer=tokenizer, data_args=data_args, max_len=training_args.model_max_length
@@ -332,7 +334,7 @@ def train():
         model=model, tokenizer=tokenizer, args=training_args, **data_module
     )
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
     trainer.save_state()
 
     trainer.model.save_pretrained(training_args.output_dir)

@@ -16,5 +16,11 @@ dependencies = [
     "torchaudio>=2.7.0",
     "torchvision>=0.22.0",
     "transformers>=4.51.3",
+    "vllm>=0.1.2",
     "wandb>=0.19.10",
+]
+
+[tool.uv.workspace]
+members = [
+    "LogicKor",
 ]
