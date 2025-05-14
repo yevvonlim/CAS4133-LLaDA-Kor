@@ -39,6 +39,149 @@ from .configuration_llada import (
     ActivationCheckpointingStrategy,
 )
 
+
+def add_gumbel_noise(
+    logits: torch.Tensor, temperature: float
+) -> torch.Tensor:
+    """
+    Apply Gumbel noise to logits for sampling.
+
+    Args:
+        logits (torch.Tensor): Unnormalized log-probabilities.
+        temperature (float): Sampling temperature. If 0, returns logits unchanged.
+
+    Returns:
+        torch.Tensor: Noisy scores ready for sampling.
+    """
+    if temperature <= 0:
+        return logits
+
+    # Sample standard Gumbel noise
+    gumbel = -torch.log(-torch.log(torch.rand_like(logits, dtype=torch.float64)))
+    noisy_logits = logits.to(torch.float64) + temperature * gumbel
+    return noisy_logits.to(logits.dtype)
+
+
+def get_num_transfer_tokens(
+    mask_index: torch.Tensor, steps: int
+) -> torch.Tensor:
+    """
+    Compute how many masked tokens to update per inner step.
+
+    Args:
+        mask_index (torch.Tensor): Boolean tensor indicating masked positions (batch, seq_len).
+        steps (int): Total number of refinement steps per block.
+
+    Returns:
+        torch.Tensor: Tensor of shape (batch, steps) with counts per step.
+    """
+    batch_size = mask_index.size(0)
+    total_masks = mask_index.sum(dim=1)
+    base = total_masks // steps
+    rem = total_masks % steps
+
+    counts = base.unsqueeze(-1).expand(-1, steps).clone()
+    for i in range(batch_size):
+        counts[i, :rem[i]] += 1
+
+    return counts
+
+
+@torch.no_grad()
+def generate_stream(
+    model: torch.nn.Module,
+    prompt_ids: torch.Tensor,
+    steps: int = 128,
+    gen_length: int = 128,
+    block_length: int = 128,
+    temperature: float = 0.0,
+    cfg_scale: float = 0.0,
+    remasking: str = "low_confidence",
+    mask_token_id: int = 126336,
+):
+    """
+    Yields intermediate token sequences while iteratively filling masked positions.
+
+    Args:
+        model (torch.nn.Module): Language model with .logits output.
+        prompt_ids (torch.Tensor): Input IDs of shape (batch, prompt_len).
+        steps (int): Total refinement steps per block.
+        gen_length (int): Number of tokens to generate.
+        block_length (int): Block size for progressive generation.
+        temperature (float): Gumbel noise temperature.
+        cfg_scale (float): Classifier-free guidance scale.
+        remasking (str): "low_confidence" or "random".
+        mask_token_id (int): Token ID for masking.
+
+    Yields:
+        torch.Tensor: Current sequence tensor of shape (batch, prompt_len + gen_length).
+    """
+    device = model.device
+    batch_size, prompt_len = prompt_ids.shape
+    total_len = prompt_len + gen_length
+
+    # Initialize sequence with masks
+    seq = torch.full(
+        (batch_size, total_len), mask_token_id, dtype=torch.long, device=device
+    )
+    seq[:, :prompt_len] = prompt_ids
+    fixed = seq != mask_token_id
+
+    assert gen_length % block_length == 0, "gen_length must be multiple of block_length"
+    num_blocks = gen_length // block_length
+    assert steps % num_blocks == 0, "steps must be divisible by num_blocks"
+    inner_steps = steps // num_blocks
+
+    for block in range(num_blocks):
+        start = prompt_len + block * block_length
+        end = start + block_length
+        block_mask = seq[:, start:end] == mask_token_id
+        transfer_counts = get_num_transfer_tokens(block_mask, inner_steps)
+
+        for step in range(inner_steps):
+            mask_positions = seq == mask_token_id
+
+            # Classifier-free guidance
+            if cfg_scale > 0:
+                uncond_seq = seq.clone()
+                uncond_seq[fixed] = mask_token_id
+                inputs = torch.cat([seq, uncond_seq], dim=0)
+                logits = model(inputs).logits
+                cond_logits, uncond_logits = torch.chunk(logits, 2, dim=0)
+                logits = uncond_logits + (cfg_scale + 1) * (cond_logits - uncond_logits)
+            else:
+                logits = model(seq).logits
+
+            # Sample tokens
+            noisy = add_gumbel_noise(logits, temperature)
+            sampled = noisy.argmax(dim=-1)
+
+            # Compute remasking confidence
+            if remasking == "low_confidence":
+                probs = F.softmax(logits.to(torch.float64), dim=-1)
+                sel_p = probs.gather(-1, sampled.unsqueeze(-1)).squeeze(-1)
+            elif remasking == "random":
+                sel_p = torch.rand_like(sampled, dtype=torch.float64)
+            else:
+                raise ValueError(f"Unknown remasking mode: {remasking}")
+
+            # Prevent updates outside current block
+            sel_p[:, end:] = float("-inf")
+
+            # Keep original tokens
+            candidate = torch.where(mask_positions, sampled, seq)
+            confidence = torch.where(mask_positions, sel_p, float("-inf"))
+
+            # Select positions to update
+            update_mask = torch.zeros_like(seq, dtype=torch.bool)
+            for i in range(batch_size):
+                topk_idx = confidence[i].topk(int(transfer_counts[i, step]))[1]
+                update_mask[i, topk_idx] = True
+
+            seq = torch.where(update_mask, candidate, seq)
+            yield seq.clone()
+
+
 if sys.version_info.minor > 8:
     from collections.abc import MutableMapping
 elif sys.version_info.minor == 8:
@@ -1725,6 +1868,64 @@ class LLaDAModelLM(PreTrainedModel):
             past_key_values=outputs.attn_key_values,
             hidden_states=hidden_states,
         )
+    
+    @torch.no_grad()
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int = 128,
+        steps: int = 128,
+        block_length: int = 128,
+        temperature: float = 0.0,
+        cfg_scale: float = 0.0,
+        remasking: str = "low_confidence",
+        mask_token_id: int = 126336, # Default from generate_stream
+    ):
+        """
+        Generates token sequences iteratively using the LLaDA masked diffusion approach.
+
+        Args:
+            input_ids (torch.Tensor): Input IDs of shape (batch, prompt_len).
+            max_new_tokens (int): Number of tokens to generate after the prompt.
+            steps (int): Total refinement steps for the generation process.
+                               Each block of block_length will be refined over steps/num_blocks.
+            block_length (int): Block size for progressive generation within gen_length.
+            temperature (float): Gumbel noise temperature for sampling. 0 means deterministic.
+            cfg_scale (float): Classifier-free guidance scale. 0 means no CFG.
+                               If > 0, model's forward pass is called twice.
+            remasking (str): Remasking strategy ("low_confidence" or "random").
+            mask_token_id (int): Token ID used for masking.
+
+        Returns:
+            torch.Tensor: The final generated sequence tensor of shape
+                          (batch, prompt_len + gen_length).
+        """
+        self.eval() # Ensure model is in evaluation mode
+        gen_length = max_new_tokens
+        prompt_ids = input_ids
+        if gen_length == 0:
+            return prompt_ids.clone() # Return prompt if no new tokens are requested
+
+        # Ensure prompt_ids are on the same device as the model
+        prompt_ids = prompt_ids.to(self.device)
+
+        final_sequence = None
+        for sequence_at_step in generate_stream(
+            model=self, # Pass the LLaDAModel instance itself
+            prompt_ids=prompt_ids,
+            steps=steps,
+            gen_length=gen_length,
+            block_length=block_length,
+            temperature=temperature,
+            cfg_scale=cfg_scale,
+            remasking=remasking,
+            mask_token_id=mask_token_id,
+        ):
+            final_sequence = sequence_at_step
+
+        # final_sequence should always be populated if gen_length > 0 due to generate_stream logic
+        return final_sequence
+
 
     def can_generate(self) -> bool:
         return True
