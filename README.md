@@ -14,28 +14,28 @@ This repo provides training code for LLaDA model released at https://github.com/
 
 1. Pull and run the Docker image with GPU support:
 
-   ```bash
+```bash
    docker pull pytorch/pytorch:2.5.0-cuda12.4-cudnn9-devel
    docker run --gpus all -it \
      -v $(pwd):/workspace/LLaDA \
      --workdir /workspace/LLaDA \
      pytorch/pytorch:2.5.0-cuda12.4-cudnn9-devel bash
-   ```
+```
 
 2. Inside the container, create and activate a Python virtual environment:
 
-   ```bash
+```bash
    python3 -m venv .venv
    source .venv/bin/activate
-   ```
+```
 
 
 3. Install project dependencies and synchronize:
 
-   ```bash
+```bash
    pip install uv
    uv sync
-   ```
+```
 
 ---
 
