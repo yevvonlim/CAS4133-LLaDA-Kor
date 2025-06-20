@@ -2,27 +2,9 @@
 **Student ID:** 2019145010
 **University:** Yonsei University
 
-# Large Language Diffusion Models
+# LLaDa Korean SFT Base Code
 
-[![arXiv](https://img.shields.io/badge/arXiv-2502.09992-red.svg)](https://arxiv.org/abs/2502.09992)
-[![deploy](https://img.shields.io/badge/Hugging%20Face%20-LLaDA_Base%20-FFEB3B)](https://huggingface.co/GSAI-ML/LLaDA-8B-Base)
-[![deploy](https://img.shields.io/badge/Hugging%20Face%20-LLaDA_Instruct%20-FFEB3B)](https://huggingface.co/GSAI-ML/LLaDA-8B-Instruct)
-[![deploy](https://img.shields.io/badge/🤗%20Hugging%20Face%20-Spaces%20demo%20-blue)](https://huggingface.co/spaces/multimodalart/LLaDA)
-
-We introduce LLaDA (**L**arge **La**nguage **D**iffusion with m**A**sking), a diffusion model with an unprecedented 8B scale, trained entirely from scratch, rivaling LLaMA3 8B in performance.
-
-<div style="display: flex; justify-content: center; flex-wrap: wrap;">
-    <img src="./imgs/LLaDA_vs_LLaMA.svg" style="width: 45%" />
-    <img src="./imgs/LLaDA_vs_LLaMA_chat.svg" style="width: 46%" />
-</div>
-
----
-
-## News
-- **[2024.05]** We have provided evaluation code based on the [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) for LLaDA-Base.
-- **[2024.02]** We have uploaded our paper to [arXiv](https://arxiv.org/abs/2502.09992) and open-sourced [LLaDA-8B-Base](https://huggingface.co/GSAI-ML/LLaDA-8B-Base) and [LLaDA-8B-Instruct](https://huggingface.co/GSAI-ML/LLaDA-8B-Instruct).
-
----
+This repo provides training code for LLaDA model released at https://github.com/ML-GSAI/LLaDA 
 
 ## LLaDA Training
 
